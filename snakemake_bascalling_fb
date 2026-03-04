@@ -1,0 +1,63 @@
+####Dry RUN command :
+#nohup /pbs/home/f/fblanchard/miniconda3/envs/snakemake_env/bin/snakemake -s snakemake_basecalling_fb --dry-run &> nohup_snakemake_basecalling.out &
+
+####Unlock command :
+#/pbs/home/f/fblanchard/miniconda3/envs/snakemake_env/bin/snakemake -s snakemake_basecalling_fb --unlock
+
+####Real command :
+#nohup /pbs/home/f/fblanchard/miniconda3/envs/snakemake_env/bin/snakemake -s snakemake_basecalling_fb -j 70 --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} -N {params.nodes} {params.gres} {params.licenses} " &> nohup_snakemake_basecalling.out &
+
+
+
+
+import pandas as pd
+from snakemake.io import glob_wildcards
+
+
+#path 
+WORKDIR = "/sps/ecoaqua"
+
+DATA =  f"{WORKDIR}/florian/Data"
+RESULTS = f"{WORKDIR}/florian/Results"
+LOGS_DIR = f"{WORKDIR}/florian/logs"
+
+# tools
+DORADO = "/pbs/home/l/lefebure/src/dorado-1.2.0-linux-x64/bin/dorado"
+
+
+# Wildcards
+ID_SAMPLES, _ = glob_wildcards(DATA + "/{id}/pod5/{fichier}.pod5")
+UNIQUE_IDS = list(set(ID_SAMPLES))
+
+rule all:
+    input:
+        expand(RESULTS + "/{id}/dorado_v5.flag", id=UNIQUE_IDS)
+
+rule bascalling:
+    params:
+        name = "bascalling_{id}",
+        out  = f"{LOGS_DIR}/V5_test_{{id}}.out",
+        err  = f"{LOGS_DIR}/V5_test_{{id}}.err",
+        partition = "gpu_v100",
+        threads = "4",
+        time = "7-00:00:00",
+        mem = "32G",
+        nodes = "1",
+        gres = "--gres gpu:v100:1",
+        licenses = "-L sps"
+    input:
+        pod5_dir = DATA + "/{id}/pod5/"
+    output:
+        flag = RESULTS + "/{id}/dorado_v5.flag"
+    shell:
+        r"""
+        mkdir -p {RESULTS}/{wildcards.id}
+
+        {DORADO} \
+            basecaller \
+            sup@v5 {input.pod5_dir} --emit-fastq \
+            > {RESULTS}/{wildcards.id}/{wildcards.id}.fastq \
+            2> {LOGS_DIR}/{wildcards.id}_dorado.err
+
+        touch {output.flag}
+        """
