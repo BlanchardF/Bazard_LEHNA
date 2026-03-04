@@ -1,0 +1,104 @@
+####Dry RUN command :
+#nohup /pbs/home/f/fblanchard/miniconda3/envs/snakemake_env/bin/snakemake -s snakemake_basecalling --dry-run &> nohup_snakemake_basecalling.out &
+
+####Unlock command :
+#/pbs/home/f/fblanchard/miniconda3/envs/snakemake_env/bin/snakemake -s snakemake_basecalling --unlock
+
+####Real command :
+#nohup /pbs/home/f/fblanchard/miniconda3/envs/snakemake_env/bin/snakemake -s snakemake_basecalling -j 70 --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} -N {params.nodes} {params.gres} {params.licenses} " &> nohup_snakemake_basecalling.out &
+
+
+#path 
+WORKDIR = "/sps/ecoaqua"
+
+DATA =  f"{WORKDIR}/tristan/nanopore"
+RESULTS = f"{WORKDIR}/florian/Results"
+LOGS_DIR = f"{WORKDIR}/florian/logs"
+
+
+# tools
+DORADO = "/pbs/home/l/lefebure/src/dorado-1.2.0-linux-x64/bin/dorado"
+POD5 = "/pbs/home/f/fblanchard/miniconda3/envs/pod5_env/bin/pod5"
+
+with open('/sps/ecoaqua/florian/lists/27012025_PBA37682.txt', 'r') as f:
+    list_ID = [line.strip() for line in f if line.strip()]
+
+#with open('/sps/ecoaqua/florian/lists/test.txt', 'r') as f:
+ #   list_ID = [line.strip() for line in f if line.strip()]
+
+
+rule all:
+    input:
+        #fast5_to_pod5
+        [DATA + f"/{ID}/pod5.flag" for ID in list_ID] +
+
+        #V5_test
+        [RESULTS + f"/{ID}/dorado_v5.flag" for ID in list_ID]
+
+
+
+
+
+
+rule fast5_to_pod5: 
+    params:
+        name= "fast5_to_pod5_{ID}",
+        out = f"{LOGS_DIR}/fast5_to_pod5_{{ID}}.out",
+        err = f"{LOGS_DIR}/fast5_to_pod5_{{ID}}.err",
+        partition="htc",
+        threads="16",
+        time="16:00:00",
+        mem="32G",
+        nodes="1",
+        gres="",
+        licenses=""
+
+    input:
+        fast5 = DATA + "/{ID}/fast5"
+
+    output:
+        flag = DATA + "/{ID}/pod5.flag"
+
+    shell:
+        r"""
+
+         mkdir -p {DATA}/{wildcards.ID}/pod5
+
+        # Conversion Fast5 -> POD5
+        {POD5} convert fast5 {input.fast5} --output {DATA}/{wildcards.ID}/pod5/{wildcards.ID}.pod5 --threads {params.threads}
+
+        touch {output.flag}
+        """
+
+
+rule V5_test:
+    params:
+        name= "V5_test_{ID}",
+        out = f"{LOGS_DIR}/V5_test_{{ID}}.out",
+        err = f"{LOGS_DIR}/V5_test_{{ID}}.err",
+        partition="gpu_v100",
+        threads="4",
+        time="7-00:00:00",
+        mem="32G",
+        nodes="1",
+        gres="--gres gpu:v100:1",
+        licenses="-L sps"
+
+    input:
+        flag = DATA + "/{ID}/pod5.flag"
+
+    output:
+        flag = RESULTS + "/{ID}/dorado_v5.flag"
+
+    shell:
+        r"""
+        mkdir -p {RESULTS}/{wildcards.ID}
+
+        {DORADO} \
+            basecaller \
+            sup@v5 {DATA}/{wildcards.ID}/pod5/ --emit-fastq\
+            > {RESULTS}/{wildcards.ID}/{wildcards.ID}.fastq \
+            2> {LOGS_DIR}/{wildcards.ID}_dorado.err || true
+
+        touch {output.flag}
+        """
